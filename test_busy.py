@@ -10,6 +10,7 @@ from typing import List, Dict, Any
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--url", default="http://127.0.0.1:8000/schedule_with_busy")
+    
     return p.parse_args()
 
 
