@@ -9,7 +9,7 @@ pip install -r requirements.txt
 ## Run the Application
 
 ```
-uvicorn server:app --host <host> --port <port> --reload
+uvicorn server:app --reload
 ```
 
 ## Run Tests

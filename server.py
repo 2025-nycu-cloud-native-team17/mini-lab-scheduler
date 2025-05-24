@@ -1,4 +1,5 @@
 from typing import List, Set, Tuple
+import uuid
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from ortools.sat.python import cp_model
@@ -7,7 +8,7 @@ from copy import deepcopy
 
 
 class Task(BaseModel):
-    id: int
+    id: str
     type: str
     duration: int
     earliest_start: int
@@ -15,12 +16,12 @@ class Task(BaseModel):
 
 
 class Worker(BaseModel):
-    id: int
+    id: str
     types: Set[str]
 
 
 class Machine(BaseModel):
-    id: int
+    id: str
     types: Set[str]
 
 
@@ -31,13 +32,13 @@ class ScheduleRequest(BaseModel):
 
 
 class WorkerBW(BaseModel):
-    id: int
+    id: str
     types: Set[str]
     busy_windows: List[Tuple[int, int]] = []  # [(start,end)]
 
 
 class MachineBW(BaseModel):
-    id: int
+    id: str
     types: Set[str]
     busy_windows: List[Tuple[int, int]] = []
 
@@ -58,11 +59,12 @@ def inject_busy_tasks(req: ScheduleRequestBW) -> tuple[ScheduleRequest, set[int]
     resources. Return the converted ScheduleRequest and the set of dummy task IDs.
     """
     req2 = deepcopy(req)
-    next_task_id = 1 + max((t.id for t in req2.tasks), default=0)
-    max_worker_id = max((w.id for w in req2.workers), default=0)
-    max_machine_id = max((m.id for m in req2.machines), default=0)
-    next_dummy_worker = count(max_worker_id + 1)  # fresh IDs
-    next_dummy_machine = count(max_machine_id + 1)
+
+    # next_task_id = 1 + max((t.id for t in req2.tasks), default=0)
+    # max_worker_id = max((w.id for w in req2.workers), default=0)
+    # max_machine_id = max((m.id for m in req2.machines), default=0)
+    # next_dummy_worker = count(max_worker_id + 1)  # fresh IDs
+    # next_dummy_machine = count(max_machine_id + 1)
 
     dummy_ids: set[int] = set()
     dummy_prefix = "_BW_"  # only for the *type* name
@@ -73,22 +75,22 @@ def inject_busy_tasks(req: ScheduleRequestBW) -> tuple[ScheduleRequest, set[int]
             ttype = f"{dummy_prefix}W{w.id}_{idx}"
             w.types.add(ttype)  # lock the real worker
 
-            # phantom machine owning just this type
-            ph_mid = next(next_dummy_machine)
+            # phantom machine with unique ID
+            ph_mid = f"ph_m_{uuid.uuid4().hex}"
             req2.machines.append(MachineBW(id=ph_mid, types={ttype}, busy_windows=[]))
 
-            # dummy task occupying both resources
+            # dummy task with unique ID
+            dummy_task_id = f"dummy_{uuid.uuid4().hex}"
             req2.tasks.append(
                 Task(
-                    id=next_task_id,
+                    id=dummy_task_id,
                     type=ttype,
                     duration=e - s,
                     earliest_start=s,
                     deadline=e,
                 )
             )
-            dummy_ids.add(next_task_id)
-            next_task_id += 1
+            dummy_ids.add(dummy_task_id)
 
     # — machine busy → dummy task + placeholder worker —
     for m in req2.machines:
@@ -96,22 +98,22 @@ def inject_busy_tasks(req: ScheduleRequestBW) -> tuple[ScheduleRequest, set[int]
             ttype = f"{dummy_prefix}M{m.id}_{idx}"
             m.types.add(ttype)  # lock the real machine
 
-            # phantom worker owning just this type
-            ph_wid = next(next_dummy_worker)
+            # phantom worker with unique ID
+            ph_wid = f"ph_w_{uuid.uuid4().hex}"
             req2.workers.append(WorkerBW(id=ph_wid, types={ttype}, busy_windows=[]))
 
-            # dummy task occupying both resources
+            # dummy task with unique ID
+            dummy_task_id = f"dummy_{uuid.uuid4().hex}"
             req2.tasks.append(
                 Task(
-                    id=next_task_id,
+                    id=dummy_task_id,
                     type=ttype,
                     duration=e - s,
                     earliest_start=s,
                     deadline=e,
                 )
             )
-            dummy_ids.add(next_task_id)
-            next_task_id += 1
+            dummy_ids.add(dummy_task_id)
 
     # cast back to basic models (busy_windows removed for solver)
     workers_clean = [Worker(id=w.id, types=w.types) for w in req2.workers]
@@ -220,7 +222,7 @@ def schedule(req: ScheduleRequest):
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 10
     if solver.Solve(mdl) not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        raise HTTPException(400, "No feasible schedule")
+        raise HTTPException(422, "No feasible schedule")
 
     plan = []
     for t in req.tasks:
